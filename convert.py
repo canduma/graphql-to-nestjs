@@ -1,77 +1,77 @@
 import json
-import re
 import os
+import sys
 
-def clean_type(type_string):
-    return type_string.replace("!", "").replace("[", "").replace("]", "")
+def transform_to_nestjs(schema_block, config):
+    block_lines = schema_block.strip().split("\n")
+    name = block_lines[0].split("{")[0].strip().split()[-1]
 
-def is_nullable(type_string):
-    return not "!" in type_string
+    if name in ["Mutation", "Query", "Subscription"]:
+        return ""
 
-def extract_graphql_classes(schema_filepath):
-    with open(schema_filepath, 'r') as file:
-        data = file.read().replace('\n', ' ')
-        data = re.sub(r'//.*', '', data)  # Remove comments
-    blocks = re.findall(r'type (.*?) { (.*?)}', data)
-    return blocks
+    fields = block_lines[1:-1]
 
-def extract_fields(block_content):
-    return re.findall(r'(\w+):\s*([\w\[\]!]+)', block_content)
+    imports = set()
+    typescript_fields = []
 
-def transform_to_nestjs(block, config):
-    class_name = block[0]
-    fields = extract_fields(block[1])
-
-    imports = {"Field", "ObjectType"}
-    custom_imports = set()
-
-    nestjs_code = []
-
-    for field in fields:
-        field_name = field[0]
-        field_type_raw = field[1]
-        field_type = clean_type(field_type_raw)
+    for i in range(0, len(fields)):
+        field_data = fields[i].strip()
+        split_data = field_data.split(":")
+        
+        if len(split_data) != 2:
+            continue
+        
+        field_name, field_type_raw = map(str.strip, split_data)
+        nullable = field_type_raw.endswith("!")
+        field_type = field_type_raw.replace("!", "").strip()
 
         if field_type in config['mapping']:
-            ts_type = config['mapping'][field_type].get('convert', field_type)
-            nestjs_code.append(f'  @Field(() => {ts_type}, {{ nullable: {str(is_nullable(field_type_raw)).lower()} }})')
-            nestjs_code.append(f'  {field_name}: {config["mapping"][field_type]["typescriptType"]};')
-            nestjs_code.append('')  # Add a blank line for spacing
+            ts_type = config['mapping'][field_type]['typescriptType']
             if 'import' in config['mapping'][field_type]:
-                custom_imports.add(config['mapping'][field_type]['import'])
+                imports.add(config['mapping'][field_type]['import'])
         else:
-            nestjs_code.append(f'  // TODO: Define and import the type {field_type}')
-            nestjs_code.append(f'  // @Field(() => {field_type}, {{ nullable: {str(is_nullable(field_type_raw)).lower()} }})')
-            nestjs_code.append(f'  // {field_name}: {field_type};')
-            nestjs_code.append('')  # Add a blank line for spacing
+            ts_type = field_type  # default to same type
 
-    for native_type in config["native_types"]:
-        if native_type in "\n".join(nestjs_code):
-            imports.add(native_type)
+        field_str = f'  @Field(() => {field_type}, {{ nullable: {str(nullable).lower()} }})\n'
+        field_str += f'  {field_name}: {ts_type};'
+        typescript_fields.append(field_str)
 
-    import_string = f"import {{ {', '.join(imports)} }} from '@nestjs/graphql';"
-    if custom_imports:
-        import_string += "\n" + "\n".join(custom_imports)
-    return [import_string, '', f"@ObjectType()", f"export class {class_name} {{"] + nestjs_code + ["}"]
+    import_str = "\n".join(sorted(imports))
 
+    if name not in ["Query", "Mutation", "Subscription"]:
+        decorator = "@ObjectType()"
+    else:
+        decorator = "@Resolver()"
+
+    ts_code = f"{import_str}\n\n{decorator}\nexport class {name} {{\n"
+    ts_code += "\n\n".join(typescript_fields)
+    ts_code += "\n}"
+
+    return ts_code
+
+def camel_to_kebab(s):
+    return ''.join(['-' + i.lower() if i.isupper() else i for i in s]).lstrip('-')
 
 
 def main(input_filepath, output_dir):
-    with open('config.json') as config_file:
-        config = json.load(config_file)
+    with open(input_filepath, 'r') as f:
+        data = f.read()
 
-    blocks = extract_graphql_classes(input_filepath)
+    with open("config.json", "r") as cf:
+        config = json.load(cf)
+
+    blocks = data.split("type ")
+
     for block in blocks:
-        class_name = block[0]
+        if not block.strip():
+            continue
         output_code = transform_to_nestjs(block, config)
-        with open(os.path.join(output_dir, f"{class_name}.dto.ts"), 'w') as output_file:
-            for line in output_code:
-                output_file.write(f"{line}\n")
+        name = block.split()[0]
+        if name in ["Mutation", "Query", "Subscription"]:
+            continue
+        filename = f"{camel_to_kebab(name)}.dto.ts"
+        with open(os.path.join(output_dir, filename), "w") as out_f:
+            out_f.write(output_code)
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) != 3:
-        print("Usage: python3 convert.py <input_schema_filepath> <output_directory>")
-        sys.exit(1)
-
     main(sys.argv[1], sys.argv[2])
