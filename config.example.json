@@ -1,0 +1,21 @@
+{
+    "mapping": {
+        "Boolean": {
+            "typescriptType": "boolean"
+        },
+        "String": {
+            "typescriptType": "string"
+        },
+        "ID": {
+            "typescriptType": "string"
+        },
+        "Int": {
+            "typescriptType": "string"
+        },
+        "Float": {
+            "typescriptType": "number"
+        }
+
+    },
+    "native_types": ["ID", "Int", "Boolean", "Float", "String"]
+}
