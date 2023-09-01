@@ -1,36 +1,61 @@
-# GraphQL to NestJS Transformer
+# GraphQL to NestJS DTO Converter
 
-Transform a GraphQL schema into a NestJS entity with appropriate decorators.
+This utility script converts a GraphQL schema into NestJS DTOs. It reads the schema file and generates one `.dto.ts` file for each type in the schema. The script uses a configuration file `config.json` to map GraphQL types to TypeScript types and can automatically include necessary imports.
 
-## Table of Contents
-- [Prerequisites](#prerequisites)
-- [Configuration](#configuration)
-    - [Config File Structure](#config-file-structure)
-- [Usage](#usage)
-- [Example](#example)
+## Setup
 
-## Prerequisites
+1. Clone the repository:
+```
+git clone [repository_link]
+```
 
-- Python 3.x
+2. Navigate to the directory:
+```
+cd [directory_name]
+```
+
+3. Ensure you have Python 3 installed.
 
 ## Configuration
 
-An example configuration file is provided named `config.example.json`. Rename this file to `config.json` and adjust it as needed.
+Before running the script, you need to set up the `config.json` file, which provides the mapping between GraphQL and TypeScript types. An example configuration `config.example.json` is provided in the repository.
 
-### Config File Structure
+The configuration file has two main sections:
+- `mapping`: Maps GraphQL types to TypeScript types, and optionally specifies an import statement.
+- `native_types`: Lists GraphQL types that are native to NestJS GraphQL (like ID, Int, Boolean, etc.)
 
-- `mapping`: Dictionary defining how types in the GraphQL schema should be transformed for NestJS.
-  - `typescriptType`: How the type should be represented in TypeScript.
-  - `import`: The import statement required for this type.
-  - `convert`: (Optional) If present, the GraphQL type will be replaced with this value.
-  
-- `native_types`: List of native types directly supported by NestJS GraphQL.
+Here's a sample configuration:
 
-## Usage
+```json
+{
+    "mapping": {
+        "User": {
+            "convert": "User2",
+            "import": "import { User } from './post.entity';",
+            "typescriptType": "User"
+        },
+        ...
+    },
+    "native_types": ["ID", "Int", "Boolean", "Float", "String"]
+}
+```
 
-1. Ensure Python is installed on your machine.
-2. Configure `config.json` as needed.
-3. Run the script:
+## Running the Script
 
-```bash
-python convert.py <input_schema_filepath> <output_filepath>
+To run the script, use the following command:
+
+```
+python3 convert.py <input_schema_filepath> <output_directory>
+```
+
+For example:
+
+```
+python3 convert.py test.graphql output
+```
+
+After execution, you should see multiple `.dto.ts` files in the specified output directory, one for each type in the GraphQL schema.
+
+## Note
+
+This script is designed for basic schema conversions. For complex schemas with various custom scalars, enums, etc., manual adjustments might be needed.

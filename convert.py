@@ -1,80 +1,77 @@
-import sys
 import json
+import re
+import os
 
-# Configuration
-with open("config.json", "r") as config_file:
-    config = json.load(config_file)
+def clean_type(type_string):
+    return type_string.replace("!", "").replace("[", "").replace("]", "")
 
-def clean_type(field_type: str) -> str:
-    return field_type.replace("[", "").replace("]", "").replace("!", "")
+def is_nullable(type_string):
+    return not "!" in type_string
 
-def is_array(field_type: str) -> bool:
-    return "[" in field_type and "]" in field_type
+def extract_graphql_classes(schema_filepath):
+    with open(schema_filepath, 'r') as file:
+        data = file.read().replace('\n', ' ')
+        data = re.sub(r'//.*', '', data)  # Remove comments
+    blocks = re.findall(r'type (.*?) { (.*?)}', data)
+    return blocks
 
-def is_nullable(field_type: str) -> bool:
-    if is_array(field_type) and "!" in field_type.split(']')[0]:
-        return False
-    return "!" not in field_type
+def extract_fields(block_content):
+    return re.findall(r'(\w+):\s*([\w\[\]!]+)', block_content)
 
-def transform_to_nestjs(schema: str, config: dict) -> (str, list):
-    lines = schema.split("\n")
-    class_name = lines[0].split(" ")[2]
+def transform_to_nestjs(block, config):
+    class_name = block[0]
+    fields = extract_fields(block[1])
 
-    nestjs_imports = {"Field", "ObjectType"}
+    imports = {"Field", "ObjectType"}
     custom_imports = set()
-    nestjs_code = f"@ObjectType()\nexport class {class_name}\n"
 
-    for line in lines[1:-1]:
-        line = line.strip()
+    nestjs_code = []
 
-        if ":" not in line:
-            continue
-
-        field_name = line.split(":")[0].strip()
-        field_type_raw = line.split(":")[1].strip().split(" ")[0]
+    for field in fields:
+        field_name = field[0]
+        field_type_raw = field[1]
         field_type = clean_type(field_type_raw)
-        
-        graphql_type = config['mapping'][field_type].get('convert', field_type) if field_type in config['mapping'] else field_type
 
         if field_type in config['mapping']:
-            ts_type = config['mapping'][field_type]['typescriptType']
+            ts_type = config['mapping'][field_type].get('convert', field_type)
+            nestjs_code.append(f'  @Field(() => {ts_type}, {{ nullable: {str(is_nullable(field_type_raw)).lower()} }})')
+            nestjs_code.append(f'  {field_name}: {config["mapping"][field_type]["typescriptType"]};')
+            nestjs_code.append('')  # Add a blank line for spacing
             if 'import' in config['mapping'][field_type]:
                 custom_imports.add(config['mapping'][field_type]['import'])
-            nestjs_code += f'  @Field(() => {graphql_type}, {{ nullable: {str(is_nullable(field_type_raw)).lower()} }})\n  {field_name}: {ts_type};\n\n'
-        elif field_type in config['native_types']:
-            ts_type = field_type
-            nestjs_imports.add(ts_type)
-            nestjs_code += f'  @Field(() => {graphql_type}, {{ nullable: {str(is_nullable(field_type_raw)).lower()} }})\n  {field_name}: {ts_type};\n\n'
         else:
-            nestjs_code += f'  // TODO: Define and import the type {field_type}\n  // @Field(() => {graphql_type}, {{ nullable: {str(is_nullable(field_type_raw)).lower()} }})\n  // {field_name}: {field_type};\n\n'
+            nestjs_code.append(f'  // TODO: Define and import the type {field_type}')
+            nestjs_code.append(f'  // @Field(() => {field_type}, {{ nullable: {str(is_nullable(field_type_raw)).lower()} }})')
+            nestjs_code.append(f'  // {field_name}: {field_type};')
+            nestjs_code.append('')  # Add a blank line for spacing
 
-    nestjs_code += "}"
+    for native_type in config["native_types"]:
+        if native_type in "\n".join(nestjs_code):
+            imports.add(native_type)
 
-    merged_imports = []
-    if nestjs_imports:
-        merged_imports.append(f"import {{ {', '.join(nestjs_imports)} }} from '@nestjs/graphql';")
-    for custom_import in custom_imports:
-        merged_imports.append(custom_import)
+    import_string = f"import {{ {', '.join(imports)} }} from '@nestjs/graphql';"
+    if custom_imports:
+        import_string += "\n" + "\n".join(custom_imports)
+    return [import_string, '', f"@ObjectType()", f"export class {class_name} {{"] + nestjs_code + ["}"]
 
-    return merged_imports + [nestjs_code]
 
-def main(input_file: str, output_file: str):
-    with open(input_file, 'r') as f:
-        schema = f.read()
 
-    nestjs_code = transform_to_nestjs(schema, config)
+def main(input_filepath, output_dir):
+    with open('config.json') as config_file:
+        config = json.load(config_file)
 
-    with open(output_file, 'w') as f:
-        f.write("\n".join(nestjs_code))
-
-    print(f"Output written to {output_file}")
+    blocks = extract_graphql_classes(input_filepath)
+    for block in blocks:
+        class_name = block[0]
+        output_code = transform_to_nestjs(block, config)
+        with open(os.path.join(output_dir, f"{class_name}.dto.ts"), 'w') as output_file:
+            for line in output_code:
+                output_file.write(f"{line}\n")
 
 if __name__ == "__main__":
+    import sys
     if len(sys.argv) != 3:
-        print("Usage: python script_name.py <input_schema_filepath> <output_filepath>")
+        print("Usage: python3 convert.py <input_schema_filepath> <output_directory>")
         sys.exit(1)
 
-    input_filepath = sys.argv[1]
-    output_filepath = sys.argv[2]
-
-    main(input_filepath, output_filepath)
+    main(sys.argv[1], sys.argv[2])
